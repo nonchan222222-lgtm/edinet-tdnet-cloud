@@ -37,6 +37,31 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+      - name: Probe counts (EDINET/TDnet)
+        env:
+          EDINET_API_KEY: ${{ secrets.EDINET_API_KEY }}
+        run: |
+          set -e
+          S="${{ github.event.inputs.start }}"
+          E="${{ github.event.inputs.end }}"
+          echo "Start=$S End=$E"
+          echo "---- EDINET (first day only) ----"
+          curl -sG \
+            --data-urlencode "date=$S" \
+            --data-urlencode "type=2" \
+            --data-urlencode "Subscription-Key=$EDINET_API_KEY" \
+            "https://api.edinet-fsa.go.jp/api/v2/documents.json" \
+          | python - <<'PY'
+import sys, json
+j=json.load(sys.stdin)
+res=j.get("results",[])
+print("results_count:", len(res))
+if res:
+    r=res[0]
+    print("sample:", {k:r.get(k) for k in ("docID","secCode","filerName","formCode","docDescription")})
+PY
+          echo "---- TDNET (first day only) ----"
+          curl -s "https://webapi.yanoshin.jp/webapi/tdnet/list/$(echo $S | tr -d -).atom" | grep -c '決算短信' || true
 
       - name: Run downloader
         env:
