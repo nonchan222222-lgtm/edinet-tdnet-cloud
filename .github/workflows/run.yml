@@ -1,4 +1,4 @@
-name: EDINET & TDnet Downloader
+name: EDINET/TDnet Downloader
 
 on:
   workflow_dispatch:
@@ -9,27 +9,16 @@ on:
       end:
         description: 'End date (YYYY-MM-DD)'
         required: true
-      codes:
-        description: 'Stock codes (comma separated)'
-        required: false
-      filetypes:
-        description: 'File types (comma separated)'
-        required: false
-      include_yuho:
-        description: 'Include Yuho? (yes/no)'
-        required: false
-      include_q:
-        description: 'Include Q? (yes/no)'
-        required: false
 
 jobs:
-  run:
+  build:
     runs-on: ubuntu-latest
-
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-      - uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
@@ -46,7 +35,7 @@ jobs:
           S="${{ github.event.inputs.start }}"
           E="${{ github.event.inputs.end }}"
           echo "Start=$S End=$E"
-          
+
           echo "---- EDINET (first day only) ----"
           curl -s \
             --data-urlencode "date=$S" \
@@ -54,17 +43,17 @@ jobs:
             --data-urlencode "Subscription-Key=$EDINET_API_KEY" \
             "https://api.edinet-fsa.go.jp/api/v2/documents.json" \
           | python - <<'PY'
-import sys, json
-j = json.load(sys.stdin)
-res = j.get("results", [])
-print("results_count:", len(res))
-if res:
-    r = res[0]
-    print("sample:", {k: r.get(k) for k in ("docID", "secCode", "fileName", "formCode", "docDescription")})
-PY
+          import sys, json
+          j = json.load(sys.stdin)
+          res = j.get("results", [])
+          print("results_count:", len(res))
+          if res:
+              r = res[0]
+              print("sample:", {k: r.get(k) for k in ("docID","secCode","fileName","formCode","docDescription")})
+          PY
 
           echo "---- TDNET (first day only) ----"
-          curl -s "https://webapi.yanoshin.jp/webapi/tdnet/list/$(echo $S | tr -d '-').atom" | grep -c "決算"
+          curl -s "https://webapi.yanoshin.jp/webapi/tdnet/list/$(echo $S | tr -d '-').atom" | grep "<title>"
 
       - name: Run downloader
         env:
@@ -73,25 +62,4 @@ PY
         run: |
           START="${{ github.event.inputs.start }}"
           END="${{ github.event.inputs.end }}"
-          CODES="${{ github.event.inputs.codes }}"
-          FILES="${{ github.event.inputs.filetypes }}"
-          YUHO="${{ github.event.inputs.include_yuho }}"
-          QTR="${{ github.event.inputs.include_q }}"
-
-          mkdir -p downloads
-          python edinet_tdnet_downloader.py "$START" "$END" "$CODES" "$FILES" "$YUHO" "$QTR"
-
-      - name: Ensure downloads folder exists
-        run: |
-          mkdir -p downloads
-          if [ -z "$(ls -A downloads)" ]; then
-            echo "No files retrieved for this run." > downloads/README.txt
-          fi
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: outputs-${{ github.run_id }}
-          path: downloads
-          if-no-files-found: warn
-          retention-days: 90
+          python edinet_tdnet_downloader.py "$START" "$END"
