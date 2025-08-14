@@ -47,7 +47,7 @@ jobs:
           E="${{ github.event.inputs.end }}"
           echo "Start=$S End=$E"
           
-          echo "---- EDINET ----"
+          echo "---- EDINET (first day only) ----"
           curl -s \
             --data-urlencode "date=$S" \
             --data-urlencode "type=2" \
@@ -63,7 +63,7 @@ if res:
     print("sample:", {k: r.get(k) for k in ("docID", "secCode", "fileName", "formCode", "docDescription")})
 PY
 
-          echo "---- TDNET ----"
+          echo "---- TDNET (first day only) ----"
           curl -s "https://webapi.yanoshin.jp/webapi/tdnet/list/$(echo $S | tr -d '-').atom" | grep -c "決算"
 
       - name: Run downloader
@@ -77,4 +77,21 @@ PY
           FILES="${{ github.event.inputs.filetypes }}"
           YUHO="${{ github.event.inputs.include_yuho }}"
           QTR="${{ github.event.inputs.include_q }}"
+
+          mkdir -p downloads
           python edinet_tdnet_downloader.py "$START" "$END" "$CODES" "$FILES" "$YUHO" "$QTR"
+
+      - name: Ensure downloads folder exists
+        run: |
+          mkdir -p downloads
+          if [ -z "$(ls -A downloads)" ]; then
+            echo "No files retrieved for this run." > downloads/README.txt
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: outputs-${{ github.run_id }}
+          path: downloads
+          if-no-files-found: warn
+          retention-days: 90
