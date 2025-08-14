@@ -13,6 +13,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
@@ -41,19 +42,28 @@ jobs:
             --data-urlencode "date=$S" \
             --data-urlencode "type=2" \
             --data-urlencode "Subscription-Key=$EDINET_API_KEY" \
-            "https://api.edinet-fsa.go.jp/api/v2/documents.json" \
-          | python - <<'PY'
-          import sys, json
-          j = json.load(sys.stdin)
-          res = j.get("results", [])
-          print("results_count:", len(res))
-          if res:
-              r = res[0]
-              print("sample:", {k: r.get(k) for k in ("docID","secCode","fileName","formCode","docDescription")})
-          PY
+            "https://api.edinet-fsa.go.jp/api/v2/documents.json" > output.json
 
-          echo "---- TDNET (first day only) ----"
-          curl -s "https://webapi.yanoshin.jp/webapi/tdnet/list/$(echo $S | tr -d '-').atom" | grep "<title>"
+          echo "=== API Response ==="
+          cat output.json || echo "(no output)"
+          echo "==================="
+
+          python - <<'PY'
+import json, os
+
+if not os.path.exists("output.json") or os.path.getsize("output.json") == 0:
+    print("No output.json file or file is empty.")
+else:
+    try:
+        with open("output.json", "r", encoding="utf-8") as f:
+            data = json.load(f)
+        print("results_count:", len(data.get("results", [])))
+        if data.get("results"):
+            r = data["results"][0]
+            print("sample:", {k: r.get(k) for k in ("docID", "secCode", "fileName")})
+    except json.JSONDecodeError as e:
+        print("JSON decode error:", e)
+PY
 
       - name: Run downloader
         env:
