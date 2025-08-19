@@ -1,25 +1,51 @@
-name: EDINET/TDnet Downloader
+name: edinet-tdnet cloud run
 
 on:
+  # 手動実行時の入力フォーム（＝検索窓）
   workflow_dispatch:
     inputs:
       start:
-        description: 'Start date (YYYY-MM-DD)'
+        description: '開始日 YYYY-MM-DD'
         required: true
+        default: '2025-08-12'
       end:
-        description: 'End date (YYYY-MM-DD)'
+        description: '終了日 YYYY-MM-DD'
         required: true
+        default: '2025-08-14'
+      codes:
+        description: '会社名/4桁コード(カンマ区切り) 例: 7203,ソニー'
+        required: false
+        default: ''
+      filetypes:
+        description: 'EDINETファイル種別（csv,pdf,xbrl をカンマ区切り）'
+        required: false
+        default: 'pdf'
+      include_yuho:
+        description: '有価証券報告書を含めるか? yes/no'
+        required: false
+        default: 'yes'
+      include_q:
+        description: '四半期報告書を含めるか? yes/no'
+        required: false
+        default: 'no'
+      tdnet:
+        description: 'TDnet(決算短信)を取得するか? yes/no'
+        required: false
+        default: 'yes'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: edinet-tdnet
+  cancel-in-progress: true
 
 jobs:
-  build:
+  run:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
@@ -28,48 +54,44 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Probe counts (EDINET/TDnet)
-        env:
-          EDINET_API_KEY: ${{ secrets.EDINET_API_KEY }}
-        run: |
-          set -e
-          S="${{ github.event.inputs.start }}"
-          E="${{ github.event.inputs.end }}"
-          echo "Start=$S End=$E"
-
-          echo "---- EDINET (first day only) ----"
-          curl -s \
-            --data-urlencode "date=$S" \
-            --data-urlencode "type=2" \
-            --data-urlencode "Subscription-Key=$EDINET_API_KEY" \
-            "https://api.edinet-fsa.go.jp/api/v2/documents.json" > output.json
-
-          echo "=== API Response ==="
-          cat output.json || echo "(no output)"
-          echo "==================="
-
-          python - <<'PY'
-import json, os
-
-if not os.path.exists("output.json") or os.path.getsize("output.json") == 0:
-    print("No output.json file or file is empty.")
-else:
-    try:
-        with open("output.json", "r", encoding="utf-8") as f:
-            data = json.load(f)
-        print("results_count:", len(data.get("results", [])))
-        if data.get("results"):
-            r = data["results"][0]
-            print("sample:", {k: r.get(k) for k in ("docID", "secCode", "fileName")})
-    except json.JSONDecodeError as e:
-        print("JSON decode error:", e)
-PY
-
+      # ---- 取得本体 ----
       - name: Run downloader
         env:
           EDINET_API_KEY: ${{ secrets.EDINET_API_KEY }}
-          DEFAULT_CODES: ${{ secrets.DEFAULT_CODES }}
+          DEFAULT_CODES:  ${{ secrets.DEFAULT_CODES }}
         run: |
+          set -e
           START="${{ github.event.inputs.start }}"
           END="${{ github.event.inputs.end }}"
-          python edinet_tdnet_downloader.py "$START" "$END"
+          CODES="${{ github.event.inputs.codes }}"
+          FILES="${{ github.event.inputs.filetypes }}"
+          YUHO="${{ github.event.inputs.include_yuho }}"
+          QTR="${{ github.event.inputs.include_q }}"
+          TD="${{ github.event.inputs.tdnet }}"
+
+          # フォーム未入力時の保険
+          if [ -z "$CODES" ] && [ -n "$DEFAULT_CODES" ]; then CODES="$DEFAULT_CODES"; fi
+
+          # 実行
+          python edinet_tdnet_downloader.py \
+            --start "$START" --end "$END" \
+            --edinet-filetypes "$FILES" \
+            --include-yuho "$YUHO" --include-quarter "$QTR" \
+            --tdnet "$TD" \
+            --codes "$CODES"
+
+      # ---- 成果物アップロード（0件でもREADMEを入れて出す）----
+      - name: Ensure downloads folder exists
+        run: |
+          mkdir -p downloads
+          if [ ! -e downloads/README.txt ]; then
+            echo "No files retrieved in this run. Check dates/codes or API key." > downloads/README.txt
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: outputs-${{ github.run_id }}
+          path: downloads
+          if-no-files-found: warn
+          retention-days: 90
